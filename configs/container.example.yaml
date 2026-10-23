@@ -1,0 +1,75 @@
+# Generated into .runtime/container/config.yaml by deploy/local.py init.
+# Edit your generated copy to enable cloud APIs. Credentials stay in env.
+app:
+  env: local
+  http_addr: 0.0.0.0:8080
+  public_origin: http://127.0.0.1:5173
+  cookie_secure: false
+mysql:
+  dsn_env: VA_MYSQL_DSN
+  max_open: 20
+redis:
+  enabled: true
+  addr: redis:6379
+  password_env: VA_REDIS_PASSWORD
+workflow:
+  dispatch_mode: kafka
+  lease_seconds: 120
+  heartbeat_seconds: 30
+  max_failure_retries: 3
+  worker_concurrency: 2
+kafka:
+  brokers: [kafka:9092]
+  media_topic: video.media.dispatch
+  agent_topic: video.agent.dispatch
+storage:
+  internal_endpoint: http://seaweed:8333
+  browser_endpoint: http://127.0.0.1:18333
+  bucket: video-agent-dev
+  region: us-east-1
+  path_style: true
+  access_key_env: VA_S3_ACCESS_KEY
+  secret_key_env: VA_S3_SECRET_KEY
+model:
+  mode: disabled
+  endpoint: ""
+  api_key_env: VA_MODEL_API_KEY
+  chat_model: ""
+  vision_model: ""
+  embedding_model: ""
+asr:
+  mode: disabled
+  secret_id_env: VA_ASR_SECRET_ID
+  secret_key_env: VA_ASR_SECRET_KEY
+  region: ap-shanghai
+  engine: 16k_zh
+asr_stage:
+  endpoint: ""
+  bucket: ""
+  region: ""
+  access_key_env: VA_COS_SECRET_ID
+  secret_key_env: VA_COS_SECRET_KEY
+search:
+  enabled: false
+  endpoint: http://elasticsearch:9200
+  api_key_env: VA_ES_API_KEY
+  index_name: video-segments-embed01-map01
+  embedding_profile: embed01
+  dimensions: 0
+media:
+  ffmpeg: ffmpeg
+  ffprobe: ffprobe
+  tesseract: tesseract
+  languages: chi_sim+eng
+  temp_dir: .runtime/media
+limits:
+  upload_max_bytes: 2147483648
+  video_max_duration_ms: 7200000
+  upload_part_bytes: 8388608
+  upload_parallelism: 3
+agent:
+  max_model_iterations: 6
+  max_tool_calls: 8
+  max_vision_calls: 2
+  max_frames_per_call: 4
+  execution_timeout_seconds: 180

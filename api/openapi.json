@@ -1,0 +1,4048 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "vedioagent API",
+    "version": "0.1.0",
+    "description": "当前 internal/api 实现的接口契约。所有时间戳字段为 RFC 3339，视频时间位置以毫秒为单位。列表统一 {items: []}。受保护路由按当前用户校验所有权，无权访问按 404 处理。JSON 请求上限 1 MiB，拒绝未知字段及尾随 JSON；按字段另有 UTF-8 字节限制。访客初始化无须凭据；受保护非 GET/HEAD 操作仍要求 Cookie 与 X-CSRF-Token；任何非 GET/HEAD 请求若携带 Origin，须与 app.public_origin 完全一致。没有自动 Bearer/API-key 认证、注册、外部视频 URL 导入或 OpenAPI 在线服务端点。本文件为静态契约，不表示服务自动暴露 /openapi.json。"
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "与 Web 同源；开发 Vite 将 /v1 代理至 127.0.0.1:8080。健康检查位于 Go API 服务根路径。"
+    }
+  ],
+  "security": [
+    {
+      "CookieAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health"
+    },
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Meta"
+    },
+    {
+      "name": "Uploads"
+    },
+    {
+      "name": "Videos"
+    },
+    {
+      "name": "Jobs"
+    },
+    {
+      "name": "Agents"
+    },
+    {
+      "name": "Sessions"
+    },
+    {
+      "name": "Runs"
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "health",
+        "summary": "进程存活检查",
+        "tags": [
+          "Health"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "ok"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-source": "internal/api/server.go",
+        "security": []
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "ready",
+        "summary": "MySQL 连通检查",
+        "tags": [
+          "Health"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "ready"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-source": "internal/api/server.go",
+        "description": "只检查 MySQL（1 秒超时），不代表 S3、Kafka、模型、ASR 或搜索服务已就绪。",
+        "security": []
+      }
+    },
+    "/v1/auth/session": {
+      "get": {
+        "operationId": "authSession",
+        "summary": "恢复当前浏览器会话和 CSRF 令牌",
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSession"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "x-source": "internal/api/server.go",
+        "description": "401 时前端自动调用 POST /v1/auth/guest；有效旧 Cookie 仍访问原用户数据。user.is_guest 标识是否为访客。"
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "summary": "撤销当前浏览器会话",
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "Set-Cookie": {
+                "description": "清除 va_session Cookie。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "x-source": "internal/api/server.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "description": "保留的会话撤销接口；公开访客前端不提供退出入口。撤销后原访客空间没有凭据恢复途径，重新初始化会创建另一空间。"
+      }
+    },
+    "/v1/meta": {
+      "get": {
+        "operationId": "meta",
+        "summary": "读取当前服务模式",
+        "tags": [
+          "Meta"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Meta"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "x-source": "internal/api/server.go",
+        "description": "mock 是合成 fixture 测试；disabled 表示该提供方未启用。历史视频/回答是否使用 mock 仍以资源自身 mock 字段为准。"
+      }
+    },
+    "/v1/videos": {
+      "get": {
+        "operationId": "listVideos",
+        "summary": "列出当前用户视频",
+        "tags": [
+          "Videos"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "description": "最多 100 条；当前没有分页查询参数。"
+      }
+    },
+    "/v1/videos/{id}": {
+      "get": {
+        "operationId": "getVideo",
+        "summary": "读取视频及当前摘要",
+        "tags": [
+          "Videos"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Video"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteVideo",
+        "summary": "软删除视频并撤销访问",
+        "tags": [
+          "Videos"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "description": "数据库标记删除并取消相关任务；不保证同步物理删除所有存储对象。"
+      }
+    },
+    "/v1/videos/{id}/versions": {
+      "get": {
+        "operationId": "listVideoVersions",
+        "summary": "列出视频内容版本",
+        "tags": [
+          "Videos"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoVersionList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          }
+        ]
+      }
+    },
+    "/v1/videos/{id}/segments": {
+      "get": {
+        "operationId": "listVideoSegments",
+        "summary": "列出聚合片段",
+        "tags": [
+          "Videos"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SegmentList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/ContentVersion"
+          }
+        ],
+        "description": "最多返回 1000 条。 不返回存储对象原始路径；帧图片使用 asset_id 换取签名 URL。"
+      }
+    },
+    "/v1/videos/{id}/sentences": {
+      "get": {
+        "operationId": "listVideoSentences",
+        "summary": "列出字幕句子",
+        "tags": [
+          "Videos"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SentenceList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/ContentVersion"
+          }
+        ],
+        "description": "按时间顺序返回字幕句子。 不返回存储对象原始路径；帧图片使用 asset_id 换取签名 URL。"
+      }
+    },
+    "/v1/videos/{id}/frames": {
+      "get": {
+        "operationId": "listVideoFrames",
+        "summary": "列出抽帧元数据",
+        "tags": [
+          "Videos"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FrameList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/ContentVersion"
+          }
+        ],
+        "description": "最多返回 1000 条。 不返回存储对象原始路径；帧图片使用 asset_id 换取签名 URL。"
+      }
+    },
+    "/v1/videos/{id}/playback-url": {
+      "get": {
+        "operationId": "videoPlaybackURL",
+        "summary": "取得视频播放签名 URL",
+        "tags": [
+          "Videos"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedURL"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/ContentVersion"
+          }
+        ],
+        "description": "签名有效期 15 分钟。校验选定内容版本归属后，返回原始 SOURCE 视频对象 URL；不是转码或分片播放端点。"
+      }
+    },
+    "/v1/assets/{id}/url": {
+      "get": {
+        "operationId": "assetURL",
+        "summary": "取得媒体资产签名 URL",
+        "tags": [
+          "Videos"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedURL"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          }
+        ],
+        "description": "校验当前用户及视频访问权；签名有效期 5 分钟。"
+      }
+    },
+    "/v1/videos/{id}/reprocess": {
+      "post": {
+        "operationId": "reprocessVideo",
+        "summary": "创建新内容版本和预处理任务",
+        "tags": [
+          "Videos"
+        ],
+        "responses": {
+          "202": {
+            "description": "请求已接受；通过任务/运行快照读取最终状态",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAccepted"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "description": "使用当前服务配置建立新的处理任务；请求不需要 JSON body。旧生效版本保留到新版本成功发布。"
+      }
+    },
+    "/v1/videos/{id}/summaries": {
+      "post": {
+        "operationId": "createSummary",
+        "summary": "对固定视频和 Agent 版本生成摘要",
+        "tags": [
+          "Videos"
+        ],
+        "responses": {
+          "202": {
+            "description": "请求已接受；通过任务/运行快照读取最终状态",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAccepted"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "description": "请求体至少传 {}。创建时固定 READY 内容版本和 PUBLISHED Agent 配置；摘要由独立 map/reduce 流程生成。轮询 job，成功后刷新视频 summary；视频详情仅显示当前生效版本的摘要。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionSelection"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/uploads": {
+      "post": {
+        "operationId": "createUpload",
+        "summary": "创建视频及分片上传会话",
+        "tags": [
+          "Uploads"
+        ],
+        "responses": {
+          "201": {
+            "description": "资源已创建（幂等重放可能返回原资源）",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadCreated"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/uploads.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CSRF"
+          },
+          {
+            "$ref": "#/components/parameters/UploadIdempotencyKey"
+          }
+        ],
+        "description": "只创建上传会话，不经 API 传输视频二进制。先获取 part-urls，再向对象存储直接 PUT 分片；全部上传后调用 complete。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/uploads/{id}/part-urls": {
+      "post": {
+        "operationId": "uploadPartURLs",
+        "summary": "批量签发分片 PUT URL",
+        "tags": [
+          "Uploads"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartURLList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/uploads.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "description": "仅限未过期的 UPLOADING 会话。编号从 1 开始，须不大于 ceil(size_bytes/part_size_bytes)。URL 有效 15 分钟。客户端直接 PUT 对应分片二进制到每个 url，附带响应 headers，不附加应用 Cookie/CSRF；保留对象存储响应 ETag。浏览器跨源上传需要对象存储 CORS 暴露 ETag。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PartURLsRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/uploads/{id}/parts": {
+      "get": {
+        "operationId": "listUploadParts",
+        "summary": "查询存储端已上传的真实分片",
+        "tags": [
+          "Uploads"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/uploads.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          }
+        ],
+        "description": "只接受 UPLOADING 会话；用于断点续传。远端对象已合并但 API 完成响应丢失时，应重试 complete，不依赖再次 ListParts。"
+      }
+    },
+    "/v1/uploads/{id}/complete": {
+      "post": {
+        "operationId": "completeUpload",
+        "summary": "校验和合并分片并创建预处理任务",
+        "tags": [
+          "Uploads"
+        ],
+        "responses": {
+          "202": {
+            "description": "请求已接受；通过任务/运行快照读取最终状态",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadCompleted"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/uploads.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "description": "幂等依据 upload_id 和已存 job_id；当前不读取 Idempotency-Key。已有任务时直接返回相同 video_id/job_id。新完成请求要求所有分片编号连续唯一、ETag 与存储一致、每片大小精确匹配（最后一片允许较小）。合并成功但响应丢失时检查服务端拥有的对象并恢复；客户端应持久化 complete 清单并重复该请求。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteUploadRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/uploads/{id}": {
+      "delete": {
+        "operationId": "abortUpload",
+        "summary": "终止尚未完成的上传",
+        "tags": [
+          "Uploads"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/uploads.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "description": "仅 UPLOADING 会话可终止；更新数据库后尽力中止远端 multipart。已完成或重复终止返回 409。"
+      }
+    },
+    "/v1/jobs/{id}": {
+      "get": {
+        "operationId": "getJob",
+        "summary": "读取任务及步骤状态",
+        "tags": [
+          "Jobs"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          }
+        ]
+      }
+    },
+    "/v1/jobs/{id}/cancel": {
+      "post": {
+        "operationId": "cancelJob",
+        "summary": "请求取消任务",
+        "tags": [
+          "Jobs"
+        ],
+        "responses": {
+          "202": {
+            "description": "请求已接受；通过任务/运行快照读取最终状态",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAccepted"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "description": "后台通过持久任务状态阻止后续发布。响应含 job_id 和 status=CANCELLED；需要后续 GET 获取权威状态。"
+      }
+    },
+    "/v1/jobs/{id}/retry": {
+      "post": {
+        "operationId": "retryJob",
+        "summary": "为终态预处理或摘要创建新任务",
+        "tags": [
+          "Jobs"
+        ],
+        "responses": {
+          "202": {
+            "description": "请求已接受；通过任务/运行快照读取最终状态",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAccepted"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "description": "仅终态任务可重试。PREPROCESS 使用当前配置重处理；SUMMARY 沿用原固定内容/Agent 版本。QA 返回 409 NEW_RUN_REQUIRED，需在会话重新提交问题。幂等 scope 沿用 reprocess 或 summary。"
+      }
+    },
+    "/v1/agents": {
+      "get": {
+        "operationId": "listAgents",
+        "summary": "列出当前用户 Agent",
+        "tags": [
+          "Agents"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "x-source": "internal/api/resources.go"
+      },
+      "post": {
+        "operationId": "createAgent",
+        "summary": "创建 Agent 和首个默认草稿",
+        "tags": [
+          "Agents"
+        ],
+        "responses": {
+          "201": {
+            "description": "资源已创建（幂等重放可能返回原资源）",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Agent"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "description": "自动创建第 1 个 DRAFT 默认配置版本；通过 versions 列表取得版本 ID。当前不读取 Idempotency-Key，重复请求会创建不同 Agent。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{id}/versions": {
+      "get": {
+        "operationId": "listAgentVersions",
+        "summary": "列出 Agent 版本",
+        "tags": [
+          "Agents"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentVersionList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          }
+        ],
+        "description": "按 version_no 倒序；配置展开在版本对象顶层。"
+      },
+      "post": {
+        "operationId": "createAgentVersion",
+        "summary": "创建新的版本草稿",
+        "tags": [
+          "Agents"
+        ],
+        "responses": {
+          "201": {
+            "description": "资源已创建（幂等重放可能返回原资源）",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentVersion"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "description": "传入完整配置；每次调用创建新 DRAFT/version_no。当前不读取 Idempotency-Key。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentConfig"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-versions/{id}": {
+      "patch": {
+        "operationId": "editAgentVersion",
+        "summary": "替换草稿版本配置",
+        "tags": [
+          "Agents"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentVersion"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "description": "只允许 DRAFT；已发布版本返回 409。尽管使用 PATCH，必须传完整配置，未传字段取零值而非保留原值。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentConfig"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-versions/{id}/publish": {
+      "post": {
+        "operationId": "publishAgentVersion",
+        "summary": "发布 Agent 版本",
+        "tags": [
+          "Agents"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Published"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "description": "验证已存配置，设为 PUBLISHED 并将所属 Agent 设为 ACTIVE/当前版本。已发布版本之后不可编辑。无须请求体。"
+      }
+    },
+    "/v1/agents/{id}/status": {
+      "put": {
+        "operationId": "setAgentStatus",
+        "summary": "启用或禁用 Agent",
+        "tags": [
+          "Agents"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentStatusRequest"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentStatusRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions": {
+      "post": {
+        "operationId": "createSession",
+        "summary": "创建固定内容和 Agent 版本的会话",
+        "tags": [
+          "Sessions"
+        ],
+        "responses": {
+          "201": {
+            "description": "资源已创建（幂等重放可能返回原资源）",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "description": "创建时固定版本，后续不会随视频重处理或 Agent 新版本发布漂移。当前不读取 Idempotency-Key，重复请求创建不同会话。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionRequest"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listSessions",
+        "summary": "列出当前用户会话",
+        "tags": [
+          "Sessions"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/VideoFilter"
+          }
+        ],
+        "description": "最多 100 条，按创建时间倒序；不提供分页参数。"
+      }
+    },
+    "/v1/sessions/{id}": {
+      "get": {
+        "operationId": "getSession",
+        "summary": "读取会话及活动运行 ID",
+        "tags": [
+          "Sessions"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{id}/messages": {
+      "get": {
+        "operationId": "listMessages",
+        "summary": "读取会话消息",
+        "tags": [
+          "Sessions"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          }
+        ],
+        "description": "按 seq 升序；assistant content 是序列化的 Answer JSON 字符串。"
+      }
+    },
+    "/v1/sessions/{id}/runs": {
+      "post": {
+        "operationId": "createRun",
+        "summary": "提交视频问答运行",
+        "tags": [
+          "Runs"
+        ],
+        "responses": {
+          "202": {
+            "description": "请求已接受；通过任务/运行快照读取最终状态",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "description": "请求只传 question；版本从会话读取。同一会话只允许一个活动运行。ACTIVE_RUN_CONFLICT 的 error.details.current_run_id 可用于恢复已有运行。返回 run_id 和 job_id，不返回 events_url；SSE 路径由 run_id 构造。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{id}": {
+      "get": {
+        "operationId": "getRun",
+        "summary": "读取运行权威快照",
+        "tags": [
+          "Runs"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          }
+        ],
+        "description": "latest_event_seq 是当前已提交的最大事件序号，不是下一待用序号。result 仅在成功发布后出现；终态 SUCCEEDED/FAILED/CANCELLED。"
+      }
+    },
+    "/v1/runs/{id}/cancel": {
+      "post": {
+        "operationId": "cancelRun",
+        "summary": "取消问答运行对应任务",
+        "tags": [
+          "Runs"
+        ],
+        "responses": {
+          "202": {
+            "description": "请求已接受；通过任务/运行快照读取最终状态",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCancelled"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/resources.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/CSRF"
+          }
+        ],
+        "description": "不取消整个会话；调用后读取运行快照。"
+      }
+    },
+    "/v1/runs/{id}/events": {
+      "get": {
+        "operationId": "streamRunEvents",
+        "summary": "重放并订阅持久运行事件",
+        "tags": [
+          "Runs"
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE UTF-8 文本流，data 是 RunEventData JSON。当前事件类型：run.queued、run.started、tool.started、tool.completed、answer.completed、run.failed、run.cancelled。",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-cache, no-transform"
+                }
+              },
+              "X-Accel-Buffering": {
+                "schema": {
+                  "type": "string",
+                  "const": "no"
+                }
+              }
+            },
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "id: 1\nevent: run.queued\ndata: {\"attempt_no\":0,\"status\":\"QUEUED\"}\n\n: heartbeat\n\nid: 2\nevent: run.started\ndata: {\"attempt_no\":1,\"phase\":\"reasoning\",\"content_version\":\"00000000-0000-4000-8000-000000000001\"}\n\n"
+              }
+            },
+            "x-event-data-schema": {
+              "$ref": "#/components/schemas/RunEventData"
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        },
+        "x-source": "internal/api/events.go",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ID"
+          },
+          {
+            "$ref": "#/components/parameters/AfterSeq"
+          },
+          {
+            "$ref": "#/components/parameters/LastEventID"
+          }
+        ],
+        "description": "先 GET 运行快照，再用 latest_event_seq 建立 SSE 可避免遗漏状态。Last-Event-ID 非空时优先于 after_seq。id 是运行内单调递增十进制序号；客户端按 id 去重，并按 data.attempt_no 区分执行尝试。服务端每 500 ms 查询持久事件（每批 100 条），每 15 秒发送注释心跳；终态且已发完事件后关闭连接。收到终态事件后 GET 快照并主动关闭 EventSource，防止自动重连循环。网络中断后从最后处理序号重连；当前实现没有事件裁剪或 snapshot.required 事件。响应开始后发生错误会断流，不再发送 JSON 错误体。"
+      }
+    },
+    "/v1/auth/guest": {
+      "post": {
+        "operationId": "createGuestSession",
+        "summary": "创建或恢复当前浏览器的访客空间",
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "headers": {
+              "X-Request-ID": {
+                "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "Set-Cookie": {
+                "description": "仅创建新会话时设置 va_session=<opaque>; Path=/; Max-Age=2592000; Expires=<30 days>; HttpOnly; SameSite=Lax；按部署设置 Secure。复用有效 Cookie 时不重新设置 Cookie 或延长会话。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSession"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-source": "internal/api/server.go",
+        "description": "公开端点，无请求体、无须密码或 CSRF。有效 va_session Cookie 直接复用原用户和 CSRF，不创建新用户或切换 owner；缺失或已过期时原子创建独立访客用户、30 天会话以及已发布的“视频助手”。新会话设置 HttpOnly、SameSite=Lax、Path=/ Cookie，Secure 由 app.cookie_secure 决定。带 Origin 时必须等于 app.public_origin。按源地址限制新访客创建，429 时 Retry-After: 60。浏览器清除站点数据或会话到期后没有找回原访客空间的接口。",
+        "security": []
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "CookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "va_session",
+        "description": "访客初始化或已有有效会话建立的 64 位十六进制不透明 Cookie；HttpOnly、SameSite=Lax。新访客会话有效 30 天，旧 Cookie 保持原有效期。CSRF 令牌单独通过 X-CSRF-Token 请求头传递。"
+      }
+    },
+    "parameters": {
+      "ID": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "资源 UUID；所有受保护资源均校验当前用户所有权。",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "CSRF": {
+        "name": "X-CSRF-Token",
+        "in": "header",
+        "required": true,
+        "description": "使用 auth/guest 或 auth/session 返回的 csrf_token。所有已认证的非 GET/HEAD 请求必填；不能替代 Cookie 凭据。无效返回 403 CSRF_INVALID。",
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "强烈建议客户端提供并在响应不确定时复用。当前实现允许省略；存在时按当前用户、操作 scope 和规范化请求体记录。相同键和请求体返回原资源，不同请求体返回 409 VERSION_CONFLICT（runs 在有活动运行时可能返回 ACTIVE_RUN_CONFLICT）。重试不同操作应使用新键。",
+        "schema": {
+          "type": "string",
+          "description": "UTF-8 编码长度最多 128 字节。",
+          "x-maxBytes": 128,
+          "minLength": 1
+        }
+      },
+      "UploadIdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "description": "上传创建必须提供 8–128 个 UTF-8 字节的键；缺失/长度错误为 400 IDEMPOTENCY_KEY_REQUIRED。相同用户/键/请求返回同一上传和视频，改动请求返回 409 VERSION_CONFLICT。",
+        "schema": {
+          "type": "string",
+          "x-minBytes": 8,
+          "x-maxBytes": 128,
+          "description": "以 UTF-8 字节数计；建议使用 ASCII UUID。"
+        }
+      },
+      "ContentVersion": {
+        "name": "content_version",
+        "in": "query",
+        "required": false,
+        "description": "选取同一视频的内容版本 UUID；省略或空字符串取 active_content_version，没有生效版本返回 409 CONTENT_NOT_READY。当前读取接口校验版本所属和所有权，不额外要求版本状态 READY。",
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "string",
+              "const": ""
+            }
+          ]
+        }
+      },
+      "VideoFilter": {
+        "name": "video_id",
+        "in": "query",
+        "required": false,
+        "description": "仅列出指定视频的会话；省略则列当前用户所有未删除视频的会话。",
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "string",
+              "const": ""
+            }
+          ]
+        }
+      },
+      "AfterSeq": {
+        "name": "after_seq",
+        "in": "query",
+        "required": false,
+        "description": "排除式游标，仅重放 seq 大于该值的持久事件。默认 0。大于当前 latest_event_seq、负数或非 int64 返回 400。存在非空 Last-Event-ID 时忽略此参数。",
+        "schema": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0,
+          "default": 0,
+          "maximum": 9223372036854775807
+        }
+      },
+      "LastEventID": {
+        "name": "Last-Event-ID",
+        "in": "header",
+        "required": false,
+        "description": "EventSource 自动重连游标；非空时优先于 after_seq，须是非负十进制 int64 且不大于 latest_event_seq。",
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "字段、UUID、JSON、游标或上传类型无效。code 包括 INVALID_ARGUMENT、UNSUPPORTED_MEDIA、IDEMPOTENCY_KEY_REQUIRED。",
+        "headers": {
+          "X-Request-ID": {
+            "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "UNAUTHENTICATED：浏览器会话缺失或已失效；可调用公开的 POST /v1/auth/guest 建立访客会话。",
+        "headers": {
+          "X-Request-ID": {
+            "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "CSRF_INVALID 或 ORIGIN_DENIED。",
+        "headers": {
+          "X-Request-ID": {
+            "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "NOT_FOUND：资源不存在或当前用户无权访问；隐藏其他用户资源是否存在。",
+        "headers": {
+          "X-Request-ID": {
+            "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "VERSION_CONFLICT、CONTENT_NOT_READY、ACTIVE_RUN_CONFLICT、UPLOAD_INCOMPLETE、UPLOAD_PART_MISMATCH、UPLOAD_SIZE_MISMATCH 或 NEW_RUN_REQUIRED。ACTIVE_RUN_CONFLICT 可在 error.details.current_run_id 返回已有运行。",
+        "headers": {
+          "X-Request-ID": {
+            "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "RATE_LIMITED（请求频率）或 QUOTA_EXCEEDED（任务并发配额）。访客初始化被限流时 Retry-After: 60；受保护写请求限流时 Retry-After: 10；配额 429 不保证有此头。",
+        "headers": {
+          "X-Request-ID": {
+            "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "Retry-After": {
+            "description": "仅部分频率限制响应设置，单位秒。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "NOT_READY 或 RATE_LIMIT_UNAVAILABLE。",
+        "headers": {
+          "X-Request-ID": {
+            "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Error": {
+        "description": "未预期错误或依赖故障，500 INTERNAL_ERROR。错误体不暴露存储或模型凭据。",
+        "headers": {
+          "X-Request-ID": {
+            "description": "本次 HTTP 请求编号；错误体 request_id 与之对应。",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "current_run_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "error",
+          "request_id"
+        ]
+      },
+      "Ok": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "is_guest": {
+            "type": "boolean",
+            "description": "true 表示自动创建的访客用户；已有用户为 false。"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "created_at",
+          "is_guest"
+        ]
+      },
+      "AuthSession": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/User"
+          },
+          "csrf_token": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "user",
+          "csrf_token"
+        ]
+      },
+      "Meta": {
+        "type": "object",
+        "properties": {
+          "model_mode": {
+            "type": "string",
+            "enum": [
+              "disabled",
+              "mock",
+              "live"
+            ]
+          },
+          "asr_mode": {
+            "type": "string",
+            "enum": [
+              "disabled",
+              "mock",
+              "live"
+            ]
+          },
+          "search_enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "model_mode",
+          "asr_mode",
+          "search_enabled"
+        ]
+      },
+      "Video": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "active_content_version": {
+            "type": "string",
+            "description": "当前生效的内容版本 UUID；没有生效版本时为空字符串。"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "latest_job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "analysis_mode": {
+            "type": "string"
+          },
+          "mock": {
+            "type": "boolean"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Answer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status",
+          "active_content_version",
+          "duration_ms",
+          "created_at",
+          "summary"
+        ],
+        "description": "latest_job_id 是最近 PREPROCESS 任务；没有该任务时省略。analysis_mode 和 mock 仅在存在生效内容版本时返回。summary 为生效版本最近成功 SUMMARY 结果；当前实现不生成独立 chapters 字段。"
+      },
+      "VideoVersion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "video_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string"
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "index_name": {
+            "type": "string"
+          },
+          "index_build_id": {
+            "type": "string"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "video_id",
+          "generation",
+          "status"
+        ]
+      },
+      "Segment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "video_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "start_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "end_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
+          },
+          "ocr_text": {
+            "type": "string"
+          },
+          "sentence_ids": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "frame_ids": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "video_version_id",
+          "ordinal",
+          "start_ms",
+          "end_ms",
+          "text",
+          "ocr_text"
+        ]
+      },
+      "Sentence": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "video_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "start_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "end_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "video_version_id",
+          "start_ms",
+          "end_ms",
+          "text"
+        ]
+      },
+      "Frame": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "video_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "timestamp_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "ocr_text": {
+            "type": "string"
+          },
+          "ocr_status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "video_version_id",
+          "asset_id",
+          "timestamp_ms",
+          "ocr_text",
+          "ocr_status"
+        ]
+      },
+      "SignedURL": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "url",
+          "expires_at"
+        ]
+      },
+      "UploadRequest": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "省略或空字符串时使用文件名。 UTF-8 编码长度最多 200 字节。",
+            "x-maxBytes": 200
+          },
+          "filename": {
+            "type": "string",
+            "description": "仅支持 .mp4、.mov、.mkv、.webm，扩展名不区分大小写。 UTF-8 编码长度最多 255 字节。",
+            "x-maxBytes": 255,
+            "minLength": 1
+          },
+          "content_type": {
+            "type": "string",
+            "description": "以 video/ 开头时保留；否则服务端使用 application/octet-stream。"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "不得超过 limits.upload_max_bytes；默认 2 GiB。"
+          }
+        },
+        "required": [
+          "filename",
+          "size_bytes"
+        ],
+        "additionalProperties": false
+      },
+      "UploadCreated": {
+        "type": "object",
+        "properties": {
+          "upload_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "video_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "part_size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "description": "使用服务端返回值划分分片，默认 8 MiB；最后一片可以小于此值。"
+          },
+          "status": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "已完成的幂等重放返回原任务 UUID，否则为空字符串。"
+          }
+        },
+        "required": [
+          "upload_id",
+          "video_id",
+          "part_size_bytes",
+          "status",
+          "job_id"
+        ]
+      },
+      "PartURLsRequest": {
+        "type": "object",
+        "properties": {
+          "part_numbers": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 10,
+            "uniqueItems": true,
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 1
+            }
+          }
+        },
+        "required": [
+          "part_numbers"
+        ],
+        "additionalProperties": false
+      },
+      "PartURL": {
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "part_number",
+          "url",
+          "headers",
+          "expires_at"
+        ]
+      },
+      "Part": {
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1
+          },
+          "etag": {
+            "type": "string",
+            "minLength": 1
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "part_number",
+          "etag"
+        ],
+        "additionalProperties": false,
+        "description": "ListParts 返回存储端真实 size_bytes。Complete 接受 size_bytes 但不信任客户端大小；服务端使用 ListParts 校验大小及 ETag。"
+      },
+      "CompleteUploadRequest": {
+        "type": "object",
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Part"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "parts"
+        ],
+        "additionalProperties": false
+      },
+      "UploadCompleted": {
+        "type": "object",
+        "properties": {
+          "video_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "video_id",
+          "job_id"
+        ]
+      },
+      "JobAccepted": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status"
+        ]
+      },
+      "JobStep": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "step_key": {
+            "type": "string"
+          },
+          "step_type": {
+            "type": "string"
+          },
+          "worker_kind": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "attempt_no": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "retry_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "next_run_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "next_poll_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "job_id",
+          "step_key",
+          "step_type",
+          "status",
+          "attempt_no"
+        ]
+      },
+      "Job": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "video_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "video_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "PREPROCESS",
+              "SUMMARY",
+              "QA"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobStep"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "video_id",
+          "video_version_id",
+          "type",
+          "status",
+          "error_code",
+          "error_message"
+        ],
+        "description": "GET 返回任务字段及步骤；steps 来自实际 Job.Steps（为空时可能省略），没有额外 job 包装层。"
+      },
+      "AgentRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "必须包含非空白字符。 UTF-8 编码长度最多 200 字节。",
+            "x-maxBytes": 200,
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "description": "UTF-8 编码长度最多 2000 字节。",
+            "x-maxBytes": 2000
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "owner_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "DISABLED"
+            ]
+          },
+          "active_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "尚未发布版本时为全零 UUID；发布后指向当前版本。"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "status",
+          "active_version_id",
+          "created_at"
+        ]
+      },
+      "AgentBudgets": {
+        "type": "object",
+        "properties": {
+          "max_tool_calls": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "不得超过 agent.max_tool_calls，默认上限 8。"
+          },
+          "max_vision_calls": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "不得超过 agent.max_vision_calls，默认上限 2。"
+          },
+          "max_model_iterations": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "不得超过 agent.max_model_iterations，默认上限 6。"
+          }
+        },
+        "required": [
+          "max_tool_calls",
+          "max_model_iterations"
+        ],
+        "additionalProperties": false
+      },
+      "AgentConfig": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "UTF-8 编码长度最多 8000 字节。",
+            "x-maxBytes": 8000
+          },
+          "model_ref": {
+            "type": "string",
+            "const": "default"
+          },
+          "tools": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "search_segments",
+                "read_segments",
+                "inspect_frames",
+                "get_video_outline"
+              ]
+            }
+          },
+          "budgets": {
+            "$ref": "#/components/schemas/AgentBudgets"
+          }
+        },
+        "required": [
+          "model_ref",
+          "tools",
+          "budgets"
+        ],
+        "additionalProperties": false,
+        "description": "版本草稿的完整配置；PATCH 同样替换完整配置，并非 JSON Merge Patch。prompt 可为空；省略 prompt 会保存为空字符串。"
+      },
+      "AgentStatusRequest": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "DISABLED"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "Published": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "PUBLISHED"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "VersionSelection": {
+        "type": "object",
+        "properties": {
+          "content_version": {
+            "type": "string",
+            "description": "省略或空字符串使用视频当前生效 READY 版本；传入值必须是同一视频的 READY 版本 UUID。",
+            "anyOf": [
+              {
+                "format": "uuid"
+              },
+              {
+                "const": ""
+              }
+            ]
+          },
+          "agent_version_id": {
+            "type": "string",
+            "description": "省略或空字符串使用当前用户最早创建且 ACTIVE 的 Agent 的当前 PUBLISHED 版本；传入值必须为所属 ACTIVE Agent 的 PUBLISHED 版本 UUID。",
+            "anyOf": [
+              {
+                "format": "uuid"
+              },
+              {
+                "const": ""
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "video_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "content_version": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agent_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "active_run_id": {
+            "type": "string",
+            "description": "当前运行 UUID；没有运行时为空字符串。"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "video_id",
+          "content_version",
+          "agent_version_id",
+          "active_run_id",
+          "created_at"
+        ]
+      },
+      "RunRequest": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "去掉首尾空白后必须非空。 UTF-8 编码长度最多 32000 字节。",
+            "x-maxBytes": 32000,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "additionalProperties": false
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "description": "user 为问题文本；assistant 为 Answer 对象的 JSON 字符串，需解析后展示。"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "run_id",
+          "seq",
+          "role",
+          "content",
+          "created_at"
+        ]
+      },
+      "Claim": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "text",
+          "evidence_ids"
+        ]
+      },
+      "Evidence": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "transcript",
+              "frame"
+            ]
+          },
+          "start_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "end_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "timestamp_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "text"
+        ],
+        "description": "transcript 使用 start_ms/end_ms（零值可能省略），frame 使用 timestamp_ms（包含 0）及 asset_id。asset_id 通过 /v1/assets/{id}/url 换取短期 URL。"
+      },
+      "Answer": {
+        "type": "object",
+        "properties": {
+          "answer_status": {
+            "type": "string",
+            "enum": [
+              "answered",
+              "insufficient_evidence"
+            ]
+          },
+          "claims": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Claim"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Evidence"
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mock": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "answer_status",
+          "claims",
+          "evidence",
+          "limitations"
+        ],
+        "description": "声明只引用实际读取的 evidence ID。mock 为 true 表示模型或固定内容版本使用合成 fixture，必须在界面明确标识；false 时该字段可能省略。"
+      },
+      "Run": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "RUNNING",
+              "SUCCEEDED",
+              "FAILED",
+              "CANCELLED"
+            ]
+          },
+          "content_version": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agent_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "latest_event_seq": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Answer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "run_id",
+          "job_id",
+          "status",
+          "content_version",
+          "agent_version_id",
+          "latest_event_seq",
+          "result"
+        ],
+        "description": "权威持久快照。result 未发布时为 null。GET 且状态 FAILED 时返回 error；POST 创建响应不补充该 error 字段。"
+      },
+      "RunCancelled": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "CANCELLED"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "RunEventData": {
+        "type": "object",
+        "properties": {
+          "attempt_no": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "content_version": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "call_id": {
+            "type": "string"
+          },
+          "evidence_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "answer": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "attempt_no"
+        ],
+        "description": "SSE 的 data JSON。其他字段随 event 类型变化；answer.completed/run.failed/run.cancelled 携带 status 和 answer。终态仍需 GET /v1/runs/{id} 读取完整快照。"
+      },
+      "AgentVersion": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "UTF-8 编码长度最多 8000 字节。",
+            "x-maxBytes": 8000
+          },
+          "model_ref": {
+            "type": "string",
+            "const": "default"
+          },
+          "tools": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "search_segments",
+                "read_segments",
+                "inspect_frames",
+                "get_video_outline"
+              ]
+            }
+          },
+          "budgets": {
+            "$ref": "#/components/schemas/AgentBudgets"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version_no": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "PUBLISHED"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "version_no",
+          "status",
+          "created_at",
+          "prompt",
+          "model_ref",
+          "tools",
+          "budgets"
+        ],
+        "description": "配置字段已展开，不使用 config 包装。已发布版本不可编辑，需创建新草稿。"
+      },
+      "SessionRequest": {
+        "type": "object",
+        "properties": {
+          "content_version": {
+            "type": "string",
+            "description": "省略或空字符串使用视频当前生效 READY 版本；传入值必须是同一视频的 READY 版本 UUID。",
+            "anyOf": [
+              {
+                "format": "uuid"
+              },
+              {
+                "const": ""
+              }
+            ]
+          },
+          "agent_version_id": {
+            "type": "string",
+            "description": "省略或空字符串使用当前用户最早创建且 ACTIVE 的 Agent 的当前 PUBLISHED 版本；传入值必须为所属 ACTIVE Agent 的 PUBLISHED 版本 UUID。",
+            "anyOf": [
+              {
+                "format": "uuid"
+              },
+              {
+                "const": ""
+              }
+            ]
+          },
+          "video_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "video_id"
+        ],
+        "additionalProperties": false
+      },
+      "VideoList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Video"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "VideoVersionList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VideoVersion"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SegmentList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Segment"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SentenceList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Sentence"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "FrameList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Frame"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "PartURLList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PartURL"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "PartList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Part"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AgentList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Agent"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AgentVersionList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentVersion"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SessionList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Session"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "MessageList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      }
+    }
+  }
+}

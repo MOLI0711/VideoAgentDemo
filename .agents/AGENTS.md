@@ -129,3 +129,20 @@
 - 提交仅包含本次任务相关变更；不自动暂存整个工作区，不夹带无关文件。
 - `git push` 仅用于用户明确要求的跨设备同步，禁止自动执行；不得以 push 代替项目部署流程。
 - 部署必须使用项目已定义的命令和目标环境，执行前确认授权覆盖该次发布。
+
+## 9. 本项目实现约定
+
+- 技术与业务范围遵循 docs/video-agent-technical-design.md 和 docs/video-agent-development-guide.md，以 Go、MySQL 和 Vue 为主。
+- cmd/ 存放 api、worker、coordinator、devtool 可执行入口；internal/ 按领域、SQL 仓储、任务、媒体、存储、检索、Agent、配置与 HTTP 职责组织，不预建空模块。
+- migrations/ 存放顺序编号 SQL；api/ 存放 OpenAPI；configs/ 只存非敏感示例；deploy/ 存放镜像与 Compose。
+- web/ 存放 Vue/Vite 和 npm 锁文件；tests/ 存放合成 fixture 和集成测试；eval/ 存放离线评测和可公开标注。
+- deploy/compose.local.yaml 与 deploy/local.py 提供克隆后的容器开发入口；configs/container.example.yaml 使用容器服务名，不能包含开发者本机绝对路径。
+- .runtime/container/ 存放该入口生成的私有 env、配置与 S3 身份文件，全部忽略；保留数据卷与现有配置，不自动覆盖或清空。
+- .runtime/ 存放忽略的本地日志、临时上传和测试产物；只清理本次明确生成的内容。web/dist/、web/node_modules/、configs/local.yaml 不提交。
+- Go 模块路径为 github.com/MOLI0711/MOLIVedio；go.mod/go.sum 由主执行者统一修改。
+- 结果发布必须验证 MySQL 租约与 attempt；业务权限基于 owner_id；最终回答保留实际证据。
+- 产品名为 vedioagent，采用免密码的独立访客空间；不得以共享 owner 暴露其他访客资料。已有有效 Cookie 保留原身份。
+- 默认测试不调用付费模型；真实连通验证单独启用，mock 或未执行测试不能描述为真实验证。
+- README 和 docs/implementation-status.md 记录实际可用命令、实现进度及缺少的环境条件。
+
+- .github/workflows/ is reserved for CI validation; ephemeral CI-only credentials must never be reused outside CI.

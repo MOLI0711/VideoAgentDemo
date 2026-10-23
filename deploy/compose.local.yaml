@@ -1,0 +1,151 @@
+name: vedioagent
+
+x-app: &app
+  image: ${VA_APP_IMAGE:-vedioagent-app:local}
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+    args:
+      GO_IMAGE: ${VA_GO_IMAGE:-golang:1.27.1-bookworm}
+      RUNTIME_IMAGE: ${VA_RUNTIME_IMAGE:-debian:bookworm-slim}
+  env_file: ../.runtime/container/env
+  volumes:
+    - ../.runtime/container/config.yaml:/app/configs/local.yaml:ro
+  restart: unless-stopped
+  labels:
+    io.vedioagent.local-run: ${VA_LOCAL_RUN:-manual}
+
+x-started: &started
+  bootstrap:
+    condition: service_completed_successfully
+
+services:
+  mysql:
+    image: ${VA_MYSQL_IMAGE:-mysql:8.4.6}
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?run local.py init first}
+      MYSQL_DATABASE: video_agent
+    volumes: [mysql-data:/var/lib/mysql]
+    healthcheck:
+      test: [CMD, mysqladmin, ping, -h, 127.0.0.1, --silent]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  redis:
+    image: ${VA_REDIS_IMAGE:-redis:7.4.2-alpine}
+    environment:
+      VA_REDIS_PASSWORD: ${VA_REDIS_PASSWORD:?run local.py init first}
+    command: [sh, -c, 'exec redis-server --appendonly yes --requirepass "$${VA_REDIS_PASSWORD}"']
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: [CMD-SHELL, 'redis-cli --no-auth-warning -a "$${VA_REDIS_PASSWORD}" ping | grep -q PONG']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  seaweed:
+    image: ${VA_SEAWEED_IMAGE:-chrislusf/seaweedfs:3.85}
+    command: [server, -dir=/data, -s3, -s3.port=8333, '-s3.allowedOrigins=${VA_PUBLIC_ORIGIN}', -s3.config=/etc/seaweed/identity.json, -ip=seaweed, -volume.max=20, -master.volumeSizeLimitMB=100]
+    ports: ["127.0.0.1:${VA_S3_PORT:-18333}:8333"]
+    volumes:
+      - seaweed-data:/data
+      - ../.runtime/container/s3.json:/etc/seaweed/identity.json:ro
+    restart: unless-stopped
+  kafka:
+    image: ${VA_KAFKA_IMAGE:-apache/kafka:3.9.0}
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes: [kafka-data:/var/lib/kafka/data]
+    healthcheck:
+      test: [CMD, /opt/kafka/bin/kafka-broker-api-versions.sh, --bootstrap-server, localhost:9092]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+  elasticsearch:
+    image: ${VA_ES_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:8.17.0}
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes: [es-data:/usr/share/elasticsearch/data]
+    healthcheck:
+      test: [CMD-SHELL, 'curl -fsS "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s" >/dev/null']
+      interval: 10s
+      timeout: 10s
+      retries: 30
+    restart: unless-stopped
+  bootstrap:
+    <<: *app
+    restart: "no"
+    entrypoint: [sh, -ec]
+    command:
+      - |
+        devtool -config /app/configs/local.yaml -action migrate
+        attempt=0
+        until devtool -config /app/configs/local.yaml -action init-storage; do
+          attempt=$$((attempt+1))
+          if [ "$$attempt" -ge 30 ]; then exit 1; fi
+          sleep 2
+        done
+        devtool -config /app/configs/local.yaml -action check
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      elasticsearch: {condition: service_healthy}
+      seaweed: {condition: service_started}
+  api:
+    <<: *app
+    depends_on: *started
+  media:
+    <<: *app
+    entrypoint: [worker]
+    command: [-config, /app/configs/local.yaml, -kind, media]
+    depends_on: *started
+  agent:
+    <<: *app
+    entrypoint: [worker]
+    command: [-config, /app/configs/local.yaml, -kind, agent]
+    depends_on: *started
+  coordinator:
+    <<: *app
+    entrypoint: [coordinator]
+    command: [-config, /app/configs/local.yaml]
+    depends_on: *started
+  web:
+    image: ${VA_WEB_IMAGE:-vedioagent-web:local}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+      args:
+        NODE_IMAGE: ${VA_NODE_IMAGE:-node:24.21.0-bookworm-slim}
+        NGINX_IMAGE: ${VA_NGINX_IMAGE:-nginx:1.30.6-alpine3.24}
+    ports: ["127.0.0.1:${VA_WEB_PORT:-5173}:80"]
+    depends_on: [api]
+    labels:
+      io.vedioagent.local-run: ${VA_LOCAL_RUN:-manual}
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  redis-data:
+  seaweed-data:
+  kafka-data:
+  es-data:

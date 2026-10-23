@@ -1,0 +1,13 @@
+.runtime/
+.env
+configs/local.yaml
+web/node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
+*.test
+coverage.out
+.DS_Store
+
+__pycache__/
+.pytest_cache/

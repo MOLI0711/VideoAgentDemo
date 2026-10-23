@@ -1,0 +1,6 @@
+.git
+.runtime
+.env
+configs/local.yaml
+web/node_modules
+web/dist
